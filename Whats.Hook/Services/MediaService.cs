@@ -1,3 +1,7 @@
+// This service is temporarily dormant - media processing disabled
+// Suppress obsolete warnings for deprecated ChatRepository methods
+#pragma warning disable CS0618
+
 using System;
 using System.IO;
 using System.Net.Http;

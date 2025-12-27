@@ -5,9 +5,13 @@ namespace Whats.Hook.Services
         private static readonly string[] RequiredEnvironmentVariables = new[]
         {
             "COMMUNICATION_SERVICES_CONNECTION_STRING",
-            "CHANNEL_REGISTRATION_ID",
-            "RETAIL_ADVISOR_API_URL",
-            "CATALOG_STORE_API_URL"
+            "CHANNEL_REGISTRATION_ID"
+        };
+
+        // Optional environment variables (have defaults)
+        private static readonly string[] OptionalEnvironmentVariables = new[]
+        {
+            "SRM_API_URL"  // Defaults to https://srm-api-recl.azurewebsites.net
         };
 
         public static void ValidateConfiguration(ILogger logger)
@@ -46,6 +50,14 @@ namespace Whats.Hook.Services
                 var value = Environment.GetEnvironmentVariable(varName);
                 var maskedValue = MaskSensitiveValue(varName, value);
                 logger.LogInformation("   {VarName}: {Value}", varName, maskedValue);
+            }
+
+            // Log optional variables with defaults
+            foreach (var varName in OptionalEnvironmentVariables)
+            {
+                var value = Environment.GetEnvironmentVariable(varName);
+                var displayValue = string.IsNullOrEmpty(value) ? "(using default)" : value;
+                logger.LogInformation("   {VarName}: {Value}", varName, displayValue);
             }
         }
 

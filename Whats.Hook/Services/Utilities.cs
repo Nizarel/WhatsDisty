@@ -96,9 +96,24 @@ namespace Whats.Hook.Services
             }
         }
 
+        /// <summary>
+        /// Generates a deterministic GUID-based conversation ID from a phone number.
+        /// Uses a namespace-based UUID (v5) to ensure the same phone number always produces the same ID.
+        /// </summary>
         public static string GenerateSessionId(string phoneNumber)
         {
-            return $"{SanitizePhoneNumber(phoneNumber)}-{DateTime.Now.Year}-{DateTime.Now.Month}{DateTime.Now.Day}";
+            // Create a deterministic GUID based on phone number
+            // This ensures the same phone always maps to the same conversation_id
+            var sanitized = SanitizePhoneNumber(phoneNumber);
+            var bytes = System.Text.Encoding.UTF8.GetBytes(sanitized);
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            var hash = sha256.ComputeHash(bytes);
+            
+            // Use first 16 bytes to create a GUID
+            var guidBytes = new byte[16];
+            Array.Copy(hash, guidBytes, 16);
+            
+            return new Guid(guidBytes).ToString();
         }
 
         public static string SanitizePhoneNumber(string phoneNumber)

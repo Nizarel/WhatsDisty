@@ -1,0 +1,37 @@
+# Build results
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+*.o
+*.so
+*.dylib
+
+# IDE
+.vs/
+.vscode/
+*.swp
+*.swo
+*~
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.user
+
+# Runtime
+*.log
+*.tmp
+.env
+.env.local
+local.settings.json
+appsettings.local.json
+
+# Dependencies
+packages/
+node_modules/
+.nuget/
+
+# OS
+.DS_Store
+Thumbs.db
