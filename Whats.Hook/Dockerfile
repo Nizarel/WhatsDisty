@@ -8,9 +8,8 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Copy project files and restore dependencies (layer caching optimization)
-COPY *.csproj ./
-COPY ../*.sln ./
-RUN dotnet restore
+COPY ["Whats.Hook.csproj", "./"]
+RUN dotnet restore "Whats.Hook.csproj"
 
 # Copy the rest of the application code
 COPY . ./
