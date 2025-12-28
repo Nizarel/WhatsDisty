@@ -42,8 +42,9 @@ namespace Whats.Hook.Repositories
 
         /// <summary>
         /// Convenience overload to send a chat message with explicit parameters.
+        /// conversation_id can be null for new conversations - API will create and return one.
         /// </summary>
-        public async Task<HttpResponseMessage> SendChatAsync(string message, string conversationId, string language = "fr")
+        public async Task<HttpResponseMessage> SendChatAsync(string message, string? conversationId, string language = "fr")
         {
             var request = new ChatRequest
             {

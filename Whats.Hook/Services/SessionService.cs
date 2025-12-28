@@ -22,13 +22,14 @@ namespace Whats.Hook.Services
         /// <summary>
         /// Process a chat message using the new SRM Chat API.
         /// POST /api/chat with {message, conversation_id, language}
+        /// Returns tuple: (responseText, returnedConversationId)
         /// </summary>
-        public async Task<string?> ProcessChatAsync(string conversationId, string messageContent, ILogger log, string language = "fr")
+        public async Task<(string? response, string? conversationId)> ProcessChatAsync(string? conversationId, string messageContent, ILogger log, string language = "fr")
         {
             try
             {
                 log.LogInformation("Sending chat message to SRM API. ConversationId: {ConversationId}, Language: {Language}", 
-                    conversationId, language);
+                    conversationId ?? "null (new conversation)", language);
 
                 var response = await _chatRepository.SendChatAsync(messageContent, conversationId, language);
                 var responseContent = await response.Content.ReadAsStringAsync();
@@ -42,36 +43,48 @@ namespace Whats.Hook.Services
                     {
                         try
                         {
-                            // Try to extract the response - adapt based on actual API response format
+                            // Parse the API response
                             using var doc = JsonDocument.Parse(responseContent);
                             var root = doc.RootElement;
 
-                            // Common response patterns - try each one
-                            if (root.TryGetProperty("response", out var responseField))
+                            // Extract conversation_id from response
+                            string? returnedConversationId = null;
+                            if (root.TryGetProperty("conversation_id", out var conversationIdField))
                             {
-                                return responseField.GetString();
-                            }
-                            if (root.TryGetProperty("message", out var messageField))
-                            {
-                                return messageField.GetString();
-                            }
-                            if (root.TryGetProperty("answer", out var answerField))
-                            {
-                                return answerField.GetString();
-                            }
-                            if (root.TryGetProperty("whatsapp_summary", out var summaryField))
-                            {
-                                return summaryField.GetString();
-                            }
-                            if (root.TryGetProperty("completion", out var completionField))
-                            {
-                                return completionField.GetString();
+                                returnedConversationId = conversationIdField.GetString();
+                                log.LogInformation("Received conversation_id from API: {ConversationId}", returnedConversationId);
                             }
 
-                            // If it's a simple string response
-                            if (root.ValueKind == JsonValueKind.String)
+                            // Extract the response text - try common patterns
+                            string? responseText = null;
+                            if (root.TryGetProperty("response", out var responseField))
                             {
-                                return root.GetString();
+                                responseText = responseField.GetString();
+                            }
+                            else if (root.TryGetProperty("message", out var messageField))
+                            {
+                                responseText = messageField.GetString();
+                            }
+                            else if (root.TryGetProperty("answer", out var answerField))
+                            {
+                                responseText = answerField.GetString();
+                            }
+                            else if (root.TryGetProperty("whatsapp_summary", out var summaryField))
+                            {
+                                responseText = summaryField.GetString();
+                            }
+                            else if (root.TryGetProperty("completion", out var completionField))
+                            {
+                                responseText = completionField.GetString();
+                            }
+                            else if (root.ValueKind == JsonValueKind.String)
+                            {
+                                responseText = root.GetString();
+                            }
+
+                            if (responseText != null)
+                            {
+                                return (responseText, returnedConversationId ?? conversationId);
                             }
 
                             log.LogWarning("Could not find response field in API response. Available properties: {Properties}",
@@ -85,7 +98,7 @@ namespace Whats.Hook.Services
                     else
                     {
                         // If it's not JSON, return the raw response
-                        return responseContent;
+                        return (responseContent, conversationId);
                     }
                 }
                 else
@@ -100,7 +113,7 @@ namespace Whats.Hook.Services
                 throw;
             }
 
-            return null;
+            return (null, conversationId);
         }
 
         #region Deprecated - Kept for potential future use

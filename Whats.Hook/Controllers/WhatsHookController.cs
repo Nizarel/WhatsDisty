@@ -23,6 +23,10 @@ namespace Whats.Hook.Controllers
         private readonly MediaService _mediaService; // Kept for future use
         private readonly NotificationService _notificationService;
         private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
+        
+        // In-memory storage for conversation IDs per phone number
+        // In production, consider using Redis or database for persistence
+        private static readonly Dictionary<string, string> _phoneConversationMap = new();
 
         private bool EventTypeSubscriptionValidation
             => HttpContext.Request.Headers["aeg-event-type"].FirstOrDefault() == "SubscriptionValidation";
@@ -187,12 +191,9 @@ namespace Whats.Hook.Controllers
 
                 _logger.LogInformation("📱 Received WhatsApp message from: {PhoneNumber}", eventData.from);
 
-                // Generate conversation ID (GUID based on phone number for session persistence)
-                var conversationId = Utilities.GenerateSessionId(eventData.from);
                 var recipientList = new List<string> { FormatPhoneNumberForWhatsApp(eventData.from) };
 
-                _logger.LogInformation("💬 Processing message. ConversationId: {ConversationId}, PhoneNumber: {PhoneNumber}", 
-                    conversationId, eventData.from);
+                _logger.LogInformation("💬 Processing message from PhoneNumber: {PhoneNumber}", eventData.from);
 
                 // Check for media (currently disabled but logged)
                 var hasMedia = CheckForMedia(jsonElement, eventData);
@@ -203,7 +204,7 @@ namespace Whats.Hook.Controllers
                 }
 
                 // Process as text message using new SRM Chat API
-                await ProcessTextMessage(eventData, conversationId, recipientList);
+                await ProcessTextMessage(eventData, eventData.from, recipientList);
 
                 _logger.LogInformation("✅ WhatsApp message processed successfully.");
             }
@@ -264,7 +265,7 @@ namespace Whats.Hook.Controllers
             return $"+{digitsOnly}";
         }
 
-        private async Task ProcessTextMessage(WhatsEventType eventData, string conversationId, List<string> recipientList)
+        private async Task ProcessTextMessage(WhatsEventType eventData, string phoneNumber, List<string> recipientList)
         {
             if (string.IsNullOrEmpty(eventData.content))
             {
@@ -275,14 +276,35 @@ namespace Whats.Hook.Controllers
             _logger.LogInformation("💬 Sending message to SRM Chat API: {Content}", 
                 eventData.content.Length > 100 ? eventData.content.Substring(0, 100) + "..." : eventData.content);
 
+            // Get existing conversation_id for this phone number, or null for new conversation
+            string? conversationId = null;
+            lock (_phoneConversationMap)
+            {
+                _phoneConversationMap.TryGetValue(phoneNumber, out conversationId);
+            }
+
+            _logger.LogInformation("📞 Phone: {Phone}, ConversationId: {ConversationId}", 
+                phoneNumber, conversationId ?? "null (new conversation)");
+
             // Use the new simplified ProcessChatAsync with SRM API
-            var chatCompletion = await _sessionService.ProcessChatAsync(conversationId, eventData.content, _logger, "fr");
+            var (response, returnedConversationId) = await _sessionService.ProcessChatAsync(conversationId, eventData.content, _logger, "fr");
             
-            if (!string.IsNullOrEmpty(chatCompletion))
+            // Store the conversation_id for future messages from this phone number
+            if (!string.IsNullOrEmpty(returnedConversationId))
+            {
+                lock (_phoneConversationMap)
+                {
+                    _phoneConversationMap[phoneNumber] = returnedConversationId;
+                }
+                _logger.LogInformation("💾 Stored conversation_id: {ConversationId} for phone: {Phone}", 
+                    returnedConversationId, phoneNumber);
+            }
+            
+            if (!string.IsNullOrEmpty(response))
             {
                 _logger.LogInformation("📤 Sending response to WhatsApp: {Response}", 
-                    chatCompletion.Length > 100 ? chatCompletion.Substring(0, 100) + "..." : chatCompletion);
-                await _notificationService.SendTextNotification(chatCompletion, recipientList, _logger);
+                    response.Length > 100 ? response.Substring(0, 100) + "..." : response);
+                await _notificationService.SendTextNotification(response, recipientList, _logger);
             }
             else
             {

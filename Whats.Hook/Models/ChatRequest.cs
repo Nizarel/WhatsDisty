@@ -3,11 +3,12 @@ namespace Whats.Hook.Models
     /// <summary>
     /// Request model for the SRM Chat API endpoint.
     /// POST https://srm-api-recl.azurewebsites.net/api/chat
+    /// conversation_id can be null for new conversations - API will create and return one.
     /// </summary>
     public class ChatRequest
     {
         public string message { get; set; } = string.Empty;
-        public string conversation_id { get; set; } = string.Empty;
+        public string? conversation_id { get; set; }
         public string language { get; set; } = "fr";
     }
 }

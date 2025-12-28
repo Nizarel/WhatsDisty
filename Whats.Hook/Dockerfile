@@ -8,12 +8,12 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Copy project files and restore dependencies (layer caching optimization)
-COPY ["Whats.Hook.csproj", "./"]
-RUN dotnet restore "Whats.Hook.csproj"
+COPY ["Whats.Hook/Whats.Hook.csproj", "Whats.Hook/"]
+RUN dotnet restore "Whats.Hook/Whats.Hook.csproj"
 
 # Copy the rest of the application code
-COPY . ./
-RUN dotnet publish -c Release -o /app/publish
+COPY ["Whats.Hook/", "Whats.Hook/"]
+RUN dotnet publish "Whats.Hook/Whats.Hook.csproj" -c Release -o /app/publish
 
 # Final stage/image
 FROM runtime AS final
