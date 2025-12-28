@@ -97,6 +97,55 @@ namespace Whats.Hook.Services
         }
 
         /// <summary>
+        /// Detects the language of a text message based on character ranges.
+        /// Returns "ar" for Arabic, "fr" for French, "en" for English.
+        /// Defaults to "ar" if unable to determine.
+        /// </summary>
+        public static string DetectLanguage(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return "ar"; // Default to Arabic
+
+            // Count characters by range
+            int arabicCount = 0;
+            int latinCount = 0;
+            int digitCount = 0;
+
+            foreach (char c in text)
+            {
+                // Arabic Unicode range: 0600-06FF
+                if (c >= '\u0600' && c <= '\u06FF')
+                    arabicCount++;
+                // Latin characters (English/French): Basic Latin + Latin-1 Supplement
+                else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || 
+                         (c >= '\u00C0' && c <= '\u00FF')) // French accents
+                    latinCount++;
+                else if (char.IsDigit(c))
+                    digitCount++;
+            }
+
+            // If message is mostly digits, default to Arabic (common for phone numbers, contract numbers)
+            if (digitCount > arabicCount && digitCount > latinCount)
+                return "ar";
+
+            // Determine language based on character count
+            if (arabicCount > latinCount)
+                return "ar";
+            else if (latinCount > 0)
+            {
+                // Basic French detection: look for French-specific words or accents
+                string lowerText = text.ToLowerInvariant();
+                if (lowerText.Contains("é") || lowerText.Contains("è") || lowerText.Contains("ê") ||
+                    lowerText.Contains("à") || lowerText.Contains("ç") || lowerText.Contains("bonjour") ||
+                    lowerText.Contains("merci") || lowerText.Contains("salut"))
+                    return "fr";
+                return "en"; // Default to English for Latin script
+            }
+
+            return "ar"; // Default to Arabic
+        }
+
+        /// <summary>
         /// Generates a deterministic GUID-based conversation ID from a phone number.
         /// Uses a namespace-based UUID (v5) to ensure the same phone number always produces the same ID.
         /// </summary>

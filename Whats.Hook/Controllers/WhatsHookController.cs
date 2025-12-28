@@ -273,6 +273,9 @@ namespace Whats.Hook.Controllers
                 return;
             }
 
+            // Detect language from message content
+            var detectedLanguage = Utilities.DetectLanguage(eventData.content);
+            
             _logger.LogInformation("💬 Sending message to SRM Chat API: {Content}", 
                 eventData.content.Length > 100 ? eventData.content.Substring(0, 100) + "..." : eventData.content);
 
@@ -283,11 +286,11 @@ namespace Whats.Hook.Controllers
                 _phoneConversationMap.TryGetValue(phoneNumber, out conversationId);
             }
 
-            _logger.LogInformation("📞 Phone: {Phone}, ConversationId: {ConversationId}", 
-                phoneNumber, conversationId ?? "null (new conversation)");
+            _logger.LogInformation("📞 Phone: {Phone}, ConversationId: {ConversationId}, DetectedLanguage: {Language}", 
+                phoneNumber, conversationId ?? "null (new conversation)", detectedLanguage);
 
             // Use the new simplified ProcessChatAsync with SRM API
-            var (response, returnedConversationId) = await _sessionService.ProcessChatAsync(conversationId, eventData.content, _logger, "fr");
+            var (response, returnedConversationId) = await _sessionService.ProcessChatAsync(conversationId, eventData.content, _logger, detectedLanguage);
             
             // Store the conversation_id for future messages from this phone number
             if (!string.IsNullOrEmpty(returnedConversationId))
