@@ -4,8 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-//#pragma warning disable CS0618 // MediaNotificationContent is deprecated but needed for audio until ACS provides alternative
-
 namespace Whats.Hook.Services
 {
     public class NotificationService
@@ -23,14 +21,63 @@ namespace Whats.Hook.Services
             log.LogInformation($"Text notification sent with result: {sendTextMessageResult.GetRawResponse().Status}");
         }
 
+        /// <summary>
+        /// Send audio message via WhatsApp using AudioNotificationContent (recommended API).
+        /// </summary>
         public async Task SendAudioNotificationFromUrl(Uri audioUrl, List<string> recipientList, ILogger log)
         {
             var notificationMessagesClient = new NotificationMessagesClient(connectionString);
-            var mediaContent = new MediaNotificationContent(new Guid(channelRegId), recipientList, audioUrl);
-            var result = await notificationMessagesClient.SendAsync(mediaContent);
-            log.LogInformation($"Audio notification sent with result: {result.GetRawResponse().Status}");
+            var audioContent = new AudioNotificationContent(new Guid(channelRegId), recipientList, audioUrl);
+            var result = await notificationMessagesClient.SendAsync(audioContent);
+            log.LogInformation($"🔊 Audio notification sent with result: {result.GetRawResponse().Status}");
         }
 
+        /// <summary>
+        /// Send image message via WhatsApp using ImageNotificationContent.
+        /// </summary>
+        public async Task SendImageNotificationFromUrl(Uri imageUrl, List<string> recipientList, string? caption, ILogger log)
+        {
+            var notificationMessagesClient = new NotificationMessagesClient(connectionString);
+            var imageContent = new ImageNotificationContent(new Guid(channelRegId), recipientList, imageUrl)
+            {
+                Caption = caption
+            };
+            var result = await notificationMessagesClient.SendAsync(imageContent);
+            log.LogInformation($"📸 Image notification sent with result: {result.GetRawResponse().Status}");
+        }
+
+        /// <summary>
+        /// Send document message via WhatsApp using DocumentNotificationContent.
+        /// </summary>
+        public async Task SendDocumentNotificationFromUrl(Uri documentUrl, List<string> recipientList, string fileName, string? caption, ILogger log)
+        {
+            var notificationMessagesClient = new NotificationMessagesClient(connectionString);
+            var documentContent = new DocumentNotificationContent(new Guid(channelRegId), recipientList, documentUrl)
+            {
+                FileName = fileName,
+                Caption = caption
+            };
+            var result = await notificationMessagesClient.SendAsync(documentContent);
+            log.LogInformation($"📄 Document notification sent with result: {result.GetRawResponse().Status}");
+        }
+
+        /// <summary>
+        /// Send video message via WhatsApp using VideoNotificationContent.
+        /// </summary>
+        public async Task SendVideoNotificationFromUrl(Uri videoUrl, List<string> recipientList, string? caption, ILogger log)
+        {
+            var notificationMessagesClient = new NotificationMessagesClient(connectionString);
+            var videoContent = new VideoNotificationContent(new Guid(channelRegId), recipientList, videoUrl)
+            {
+                Caption = caption
+            };
+            var result = await notificationMessagesClient.SendAsync(videoContent);
+            log.LogInformation($"🎥 Video notification sent with result: {result.GetRawResponse().Status}");
+        }
+
+        /// <summary>
+        /// Upload audio bytes to blob storage and send as WhatsApp audio message.
+        /// </summary>
         public async Task SendAudioNotificationFromBytes(byte[] audioBytes, string fileName, string contentType, BlobStorageService blobService, List<string> recipientList, ILogger log)
         {
             var url = await blobService.UploadAudioAsync(audioBytes, fileName, contentType, log);
@@ -46,5 +93,3 @@ namespace Whats.Hook.Services
         }
     }
 }
-
-//#pragma warning restore CS0618
