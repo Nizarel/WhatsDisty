@@ -49,7 +49,11 @@ namespace Whats.Hook.Repositories
         {
             using var content = new MultipartFormDataContent();
             var streamContent = new StreamContent(audioStream);
-            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+            
+            // Extract base media type without parameters (e.g., "audio/ogg; codecs=opus" -> "audio/ogg")
+            // MediaTypeHeaderValue doesn't accept content types with parameters in constructor
+            var baseContentType = contentType.Split(';')[0].Trim();
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(baseContentType);
             content.Add(streamContent, "audio", fileName);
 
             return await _httpClient.PostAsync($"{_srmApiUrl}/api/speech-to-text", content);

@@ -255,11 +255,51 @@ namespace Whats.Hook.Services
                 await mediaContentStream.CopyToAsync(memoryStream);
                 memoryStream.Position = 0;
 
-                var fileName = $"voice_{eventData.media.id}.wav";
-                var contentType = eventData.media.mimeType ?? "audio/wav";
+                _logger.LogInformation("📥 Downloaded voice audio: {Size} bytes, mimeType: {MimeType}", memoryStream.Length, eventData.media.mimeType ?? "unknown");
 
-                var response = await _chatRepository.SendSpeechToTextAsync(memoryStream, fileName, contentType);
+                // Convert OGG to WAV if needed (STT API only accepts WAV)
+                byte[] audioData;
+                string contentType;
+                string fileName;
+                
+                var originalMimeType = eventData.media.mimeType ?? "audio/ogg";
+                if (originalMimeType.Contains("ogg") || originalMimeType.Contains("opus"))
+                {
+                    _logger.LogInformation("🔄 Converting OGG/Opus to WAV for STT API...");
+                    var wavData = await AudioConverter.ConvertOggToWavAsync(memoryStream.ToArray(), _logger);
+                    if (wavData == null || wavData.Length == 0)
+                    {
+                        _logger.LogError("❌ Audio conversion failed");
+                        return null;
+                    }
+                    audioData = wavData;
+                    contentType = "audio/wav";
+                    fileName = $"voice_{eventData.media.id}.wav";
+                }
+                else
+                {
+                    audioData = memoryStream.ToArray();
+                    contentType = originalMimeType.Split(';')[0].Trim();
+                    var extension = contentType.Contains("wav") ? "wav" : 
+                                   contentType.Contains("mp3") ? "mp3" : 
+                                   contentType.Contains("mp4") ? "m4a" : "wav";
+                    fileName = $"voice_{eventData.media.id}.{extension}";
+                }
+
+                _logger.LogInformation("📤 Sending audio to STT API: {Size} bytes, contentType: {ContentType}, fileName: {FileName}", 
+                    audioData.Length, contentType, fileName);
+
+                using var audioStream = new MemoryStream(audioData);
+                var response = await _chatRepository.SendSpeechToTextAsync(audioStream, fileName, contentType);
                 var responseContent = await response.Content.ReadAsStringAsync();
+
+                _logger.LogInformation("📥 STT API response: Status={Status}, Body={Body}", response.StatusCode, responseContent);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError("❌ STT API returned error. Status: {Status}, Response: {Response}", response.StatusCode, responseContent);
+                    return null;
+                }
 
                 if (string.IsNullOrEmpty(responseContent))
                 {

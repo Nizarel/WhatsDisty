@@ -30,6 +30,8 @@
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.0.0" />
     <!-- NEW: Azure Blob Storage for hosting TTS audio -->
     <PackageReference Include="Azure.Storage.Blobs" Version="12.26.0" />
+    <!-- Azure Identity for Managed Identity authentication -->
+    <PackageReference Include="Azure.Identity" Version="1.17.1" />
   </ItemGroup>
   <ItemGroup>
     <None Update="host.json">

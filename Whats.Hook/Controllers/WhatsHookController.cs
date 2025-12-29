@@ -27,6 +27,7 @@ namespace Whats.Hook.Controllers
         // In-memory storage for conversation IDs per phone number
         // In production, consider using Redis or database for persistence
         private static readonly Dictionary<string, string> _phoneConversationMap = new();
+        private static readonly Dictionary<string, string> _phoneLanguageMap = new();
 
         private bool EventTypeSubscriptionValidation
             => HttpContext.Request.Headers["aeg-event-type"].FirstOrDefault() == "SubscriptionValidation";
@@ -347,9 +348,19 @@ namespace Whats.Hook.Controllers
                 return;
             }
 
+            // Convert WAV to OGG Opus for WhatsApp (WhatsApp doesn't support WAV)
+            _logger.LogInformation("🔄 Converting TTS audio from WAV to OGG for WhatsApp...");
+            var oggBytes = await AudioConverter.ConvertWavToOggAsync(ttsBytes, _logger);
+            if (oggBytes == null || oggBytes.Length == 0)
+            {
+                _logger.LogWarning("WAV to OGG conversion failed; falling back to text response");
+                await _notificationService.SendTextNotification(chatResponse, recipientList, _logger);
+                return;
+            }
+
             var blobService = new BlobStorageService();
-            var fileName = $"tts_{Guid.NewGuid():N}.wav";
-            await _notificationService.SendAudioNotificationFromBytes(ttsBytes, fileName, "audio/wav", blobService, recipientList, _logger);
+            var fileName = $"tts_{Guid.NewGuid():N}.ogg";
+            await _notificationService.SendAudioNotificationFromBytes(oggBytes, fileName, "audio/ogg", blobService, recipientList, _logger);
             _logger.LogInformation("✅ Voice response sent");
         }
 
@@ -364,8 +375,12 @@ namespace Whats.Hook.Controllers
             {
                 _logger.LogError("❌ OCR processing failed or returned unsuccessful status");
                 
-                // Send error message in Arabic (most common language)
-                var errorMessage = "عذراً، لم أتمكن من قراءة الفاتورة. يرجى التأكد من وضوح الصورة وإرسالها مرة أخرى.";
+                // Send error message in detected language or default to French
+                string? storedLanguage = null;
+                lock (_phoneLanguageMap) { _phoneLanguageMap.TryGetValue(phoneNumber, out storedLanguage); }
+                var errorMessage = storedLanguage == "ar" 
+                    ? "عذراً، لم أتمكن من قراءة الفاتورة. يرجى التأكد من وضوح الصورة وإرسالها مرة أخرى."
+                    : "Désolé, je n'ai pas pu lire la facture. Veuillez vous assurer que l'image est claire et la renvoyer.";
                 await _notificationService.SendTextNotification(errorMessage, recipientList, _logger);
                 return;
             }
@@ -378,25 +393,41 @@ namespace Whats.Hook.Controllers
             {
                 _logger.LogWarning("⚠️ No contracts found in invoice image");
                 
-                var noContractMessage = "لم يتم العثور على أي رقم عقد في الفاتورة. يرجى التأكد من إرسال صورة فاتورة الماء أو الكهرباء.";
+                string? storedLanguage = null;
+                lock (_phoneLanguageMap) { _phoneLanguageMap.TryGetValue(phoneNumber, out storedLanguage); }
+                var noContractMessage = storedLanguage == "ar"
+                    ? "لم يتم العثور على أي رقم عقد في الفاتورة. يرجى التأكد من إرسال صورة فاتورة الماء أو الكهرباء."
+                    : "Aucun numéro de contrat trouvé dans la facture. Veuillez vous assurer d'envoyer une image de facture d'eau ou d'électricité.";
                 await _notificationService.SendTextNotification(noContractMessage, recipientList, _logger);
                 return;
             }
 
-            // Get existing conversation_id for this phone number
+            // Get existing conversation_id and language for this phone number
             string? conversationId = null;
+            string? language = null;
             lock (_phoneConversationMap)
             {
                 _phoneConversationMap.TryGetValue(phoneNumber, out conversationId);
             }
+            lock (_phoneLanguageMap)
+            {
+                _phoneLanguageMap.TryGetValue(phoneNumber, out language);
+            }
+            language ??= "fr"; // Default to French if no language detected yet
+            _logger.LogInformation("🌐 Using language: {Language} for invoice processing", language);
 
             // Process water contract if found
             if (hasWater)
             {
                 _logger.LogInformation("💧 Water contract found: {Contract}", ocrResult.water_contract);
                 
-                var waterMessage = $"رقم عقد الماء المستخرج من الفاتورة: {ocrResult.water_contract}";
-                var (waterResponse, waterConvId) = await _sessionService.ProcessChatAsync(conversationId, waterMessage, _logger, "ar");
+                // Send message in detected language
+                var waterMessage = language == "ar" 
+                    ? $"رقم عقد الماء المستخرج من الفاتورة: {ocrResult.water_contract}"
+                    : $"Numéro de contrat d'eau extrait de la facture: {ocrResult.water_contract}";
+                var (waterResponse, waterConvId) = await _sessionService.ProcessChatAsync(conversationId, waterMessage, _logger, language);
+                
+                _logger.LogInformation("💧 Water chat response: {Response}", waterResponse ?? "(null)");
                 
                 if (!string.IsNullOrEmpty(waterConvId))
                 {
@@ -411,6 +442,10 @@ namespace Whats.Hook.Controllers
                 {
                     await _notificationService.SendTextNotification(waterResponse, recipientList, _logger);
                 }
+                else
+                {
+                    _logger.LogWarning("⚠️ No response from chat API for water contract");
+                }
             }
 
             // Process electricity contract if found
@@ -418,8 +453,12 @@ namespace Whats.Hook.Controllers
             {
                 _logger.LogInformation("⚡ Electricity contract found: {Contract}", ocrResult.electricity_contract);
                 
-                var electricityMessage = $"رقم عقد الكهرباء المستخرج من الفاتورة: {ocrResult.electricity_contract}";
-                var (electricityResponse, electricityConvId) = await _sessionService.ProcessChatAsync(conversationId, electricityMessage, _logger, "ar");
+                var electricityMessage = language == "ar"
+                    ? $"رقم عقد الكهرباء المستخرج من الفاتورة: {ocrResult.electricity_contract}"
+                    : $"Numéro de contrat d'électricité extrait de la facture: {ocrResult.electricity_contract}";
+                var (electricityResponse, electricityConvId) = await _sessionService.ProcessChatAsync(conversationId, electricityMessage, _logger, language);
+                
+                _logger.LogInformation("⚡ Electricity chat response: {Response}", electricityResponse ?? "(null)");
                 
                 if (!string.IsNullOrEmpty(electricityConvId))
                 {
@@ -432,6 +471,10 @@ namespace Whats.Hook.Controllers
                 if (!string.IsNullOrEmpty(electricityResponse))
                 {
                     await _notificationService.SendTextNotification(electricityResponse, recipientList, _logger);
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ No response from chat API for electricity contract");
                 }
             }
 
@@ -448,6 +491,12 @@ namespace Whats.Hook.Controllers
 
             // Detect language from message content
             var detectedLanguage = Utilities.DetectLanguage(eventData.content);
+            
+            // Store detected language for this phone number (for use in subsequent messages like image/voice)
+            lock (_phoneLanguageMap)
+            {
+                _phoneLanguageMap[phoneNumber] = detectedLanguage;
+            }
             
             _logger.LogInformation("💬 Sending message to SRM Chat API: {Content}", 
                 eventData.content.Length > 100 ? eventData.content.Substring(0, 100) + "..." : eventData.content);

@@ -64,6 +64,8 @@ namespace Whats.Hook.Services
 
                 if (response.IsSuccessStatusCode)
                 {
+                    log.LogDebug("Raw API response: {Response}", responseContent);
+                    
                     if (Services.Utilities.IsValidJson(responseContent))
                     {
                         try
@@ -82,29 +84,40 @@ namespace Whats.Hook.Services
 
                             // Extract the response text - try common patterns
                             string? responseText = null;
-                            if (root.TryGetProperty("response", out var responseField))
+                            if (root.TryGetProperty("bot_answer", out var botAnswerField))
+                            {
+                                responseText = botAnswerField.GetString();
+                                log.LogDebug("Found 'bot_answer' field: {Text}", responseText?.Substring(0, Math.Min(100, responseText?.Length ?? 0)));
+                            }
+                            else if (root.TryGetProperty("response", out var responseField))
                             {
                                 responseText = responseField.GetString();
+                                log.LogDebug("Found 'response' field: {Text}", responseText?.Substring(0, Math.Min(100, responseText?.Length ?? 0)));
                             }
                             else if (root.TryGetProperty("message", out var messageField))
                             {
                                 responseText = messageField.GetString();
+                                log.LogDebug("Found 'message' field: {Text}", responseText?.Substring(0, Math.Min(100, responseText?.Length ?? 0)));
                             }
                             else if (root.TryGetProperty("answer", out var answerField))
                             {
                                 responseText = answerField.GetString();
+                                log.LogDebug("Found 'answer' field: {Text}", responseText?.Substring(0, Math.Min(100, responseText?.Length ?? 0)));
                             }
                             else if (root.TryGetProperty("whatsapp_summary", out var summaryField))
                             {
                                 responseText = summaryField.GetString();
+                                log.LogDebug("Found 'whatsapp_summary' field: {Text}", responseText?.Substring(0, Math.Min(100, responseText?.Length ?? 0)));
                             }
                             else if (root.TryGetProperty("completion", out var completionField))
                             {
                                 responseText = completionField.GetString();
+                                log.LogDebug("Found 'completion' field: {Text}", responseText?.Substring(0, Math.Min(100, responseText?.Length ?? 0)));
                             }
                             else if (root.ValueKind == JsonValueKind.String)
                             {
                                 responseText = root.GetString();
+                                log.LogDebug("Root is string: {Text}", responseText?.Substring(0, Math.Min(100, responseText?.Length ?? 0)));
                             }
 
                             if (responseText != null)
@@ -114,6 +127,7 @@ namespace Whats.Hook.Services
 
                             log.LogWarning("Could not find response field in API response. Available properties: {Properties}",
                                 string.Join(", ", root.EnumerateObject().Select(p => p.Name)));
+                            log.LogWarning("Full response for debugging: {Response}", responseContent);
                         }
                         catch (JsonException ex)
                         {
@@ -123,6 +137,7 @@ namespace Whats.Hook.Services
                     else
                     {
                         // If it's not JSON, return the raw response
+                        log.LogInformation("Response is not JSON, returning raw: {Response}", responseContent);
                         return (responseContent, conversationId);
                     }
                 }
