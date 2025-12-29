@@ -20,6 +20,31 @@ namespace Whats.Hook.Services
         }
 
         /// <summary>
+        /// Convert text to speech using SRM TTS API and return audio bytes.
+        /// </summary>
+        public async Task<byte[]?> GetTextToSpeechAsync(string text, ILogger log)
+        {
+            try
+            {
+                var response = await _chatRepository.SendTextToSpeechAsync(text);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var rc = await response.Content.ReadAsStringAsync();
+                    log.LogError("TTS API failed. Status={Status}. Body={Body}", response.StatusCode, rc);
+                    return null;
+                }
+
+                var audioBytes = await response.Content.ReadAsByteArrayAsync();
+                return audioBytes;
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "Error calling TTS API");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Process a chat message using the new SRM Chat API.
         /// POST /api/chat with {message, conversation_id, language}
         /// Returns tuple: (responseText, returnedConversationId)

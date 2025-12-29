@@ -202,9 +202,14 @@ namespace Whats.Hook.Controllers
                     _logger.LogInformation("📸 Image invoice detected - processing with OCR");
                     await ProcessInvoiceImage(eventData, eventData.from, recipientList);
                 }
+                else if (hasMedia && (eventData.media?.mimeType?.StartsWith("audio/") == true || (eventData.media?.mimeType?.Contains("ogg") ?? false)))
+                {
+                    _logger.LogInformation("🎤 Voice message detected - processing with STT");
+                    await ProcessVoiceMessage(eventData, eventData.from, recipientList);
+                }
                 else if (hasMedia)
                 {
-                    _logger.LogWarning("📸 Non-image media detected but not supported yet. Type: {Type}", eventData.media?.mimeType ?? "unknown");
+                    _logger.LogWarning("📎 Unsupported media type: {Type}", eventData.media?.mimeType ?? "unknown");
                     await ProcessTextMessage(eventData, eventData.from, recipientList);
                 }
                 else
@@ -296,6 +301,56 @@ namespace Whats.Hook.Controllers
             
             // Add + prefix for international format
             return $"+{digitsOnly}";
+        }
+
+        private async Task ProcessVoiceMessage(WhatsEventType eventData, string phoneNumber, List<string> recipientList)
+        {
+            _logger.LogInformation("🎤 Processing voice for phone: {Phone}", phoneNumber);
+
+            var stt = await _mediaService.ProcessSpeechToTextAsync(eventData, _logger);
+            if (stt == null || stt.status != "success" || string.IsNullOrWhiteSpace(stt.text))
+            {
+                var errorMessage = "عذراً، لم أتمكن من فهم الرسالة الصوتية. يرجى المحاولة مرة أخرى أو إرسال رسالة نصية.";
+                await _notificationService.SendTextNotification(errorMessage, recipientList, _logger);
+                return;
+            }
+
+            var language = (stt.language?.Split('-').FirstOrDefault() ?? Utilities.DetectLanguage(stt.text)) ?? "ar";
+
+            string? conversationId = null;
+            lock (_phoneConversationMap)
+            {
+                _phoneConversationMap.TryGetValue(phoneNumber, out conversationId);
+            }
+
+            var (chatResponse, returnedConversationId) = await _sessionService.ProcessChatAsync(conversationId, stt.text, _logger, language);
+            if (!string.IsNullOrEmpty(returnedConversationId))
+            {
+                lock (_phoneConversationMap)
+                {
+                    _phoneConversationMap[phoneNumber] = returnedConversationId;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(chatResponse))
+            {
+                _logger.LogWarning("No chat response for voice message; sending transcription as text");
+                await _notificationService.SendTextNotification(stt.text!, recipientList, _logger);
+                return;
+            }
+
+            var ttsBytes = await _sessionService.GetTextToSpeechAsync(chatResponse, _logger);
+            if (ttsBytes == null || ttsBytes.Length == 0)
+            {
+                _logger.LogWarning("TTS failed; falling back to text response");
+                await _notificationService.SendTextNotification(chatResponse, recipientList, _logger);
+                return;
+            }
+
+            var blobService = new BlobStorageService();
+            var fileName = $"tts_{Guid.NewGuid():N}.wav";
+            await _notificationService.SendAudioNotificationFromBytes(ttsBytes, fileName, "audio/wav", blobService, recipientList, _logger);
+            _logger.LogInformation("✅ Voice response sent");
         }
 
         private async Task ProcessInvoiceImage(WhatsEventType eventData, string phoneNumber, List<string> recipientList)

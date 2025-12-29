@@ -41,6 +41,34 @@ namespace Whats.Hook.Repositories
         }
 
         /// <summary>
+        /// Convert speech audio to text using Speech-to-Text API.
+        /// POST /api/speech-to-text with multipart/form-data 'audio' field.
+        /// Returns JSON {language, status, text}.
+        /// </summary>
+        public async Task<HttpResponseMessage> SendSpeechToTextAsync(Stream audioStream, string fileName, string contentType)
+        {
+            using var content = new MultipartFormDataContent();
+            var streamContent = new StreamContent(audioStream);
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+            content.Add(streamContent, "audio", fileName);
+
+            return await _httpClient.PostAsync($"{_srmApiUrl}/api/speech-to-text", content);
+        }
+
+        /// <summary>
+        /// Synthesize speech audio from text.
+        /// POST /api/synthesize/speech with JSON {text}.
+        /// Returns binary audio stream.
+        /// </summary>
+        public async Task<HttpResponseMessage> SendTextToSpeechAsync(string text)
+        {
+            var payload = new { text };
+            var json = JsonSerializer.Serialize(payload, _jsonOptions);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            return await _httpClient.PostAsync($"{_srmApiUrl}/api/synthesize/speech", content);
+        }
+
+        /// <summary>
         /// Extract water and electricity contract numbers from invoice image.
         /// POST /api/ocr/extract-contract with multipart/form-data file upload.
         /// </summary>

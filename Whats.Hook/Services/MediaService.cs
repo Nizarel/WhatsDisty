@@ -226,6 +226,70 @@ namespace Whats.Hook.Services
             }
         }
 
+        /// <summary>
+        /// Process voice message using new Speech-to-Text endpoint.
+        /// </summary>
+        public async Task<SpeechToTextResponse?> ProcessSpeechToTextAsync(WhatsEventType eventData, ILogger log)
+        {
+            if (eventData.media == null || string.IsNullOrEmpty(eventData.media.id))
+            {
+                _logger.LogError("Media information is missing for STT processing");
+                return null;
+            }
+
+            _logger.LogInformation("🎤 Processing voice STT with media ID: {MediaId}", eventData.media.id);
+
+            try
+            {
+                var mediaContentResponse = await _notificationMessagesClient.DownloadMediaAsync(eventData.media.id);
+                await using var mediaContentStream = mediaContentResponse.Value;
+
+                if (mediaContentStream.Length == 0)
+                {
+                    _logger.LogWarning("Downloaded voice stream is empty for media ID: {MediaId}", eventData.media.id);
+                    return null;
+                }
+
+                // Copy to memory stream for HttpClient
+                using var memoryStream = new MemoryStream();
+                await mediaContentStream.CopyToAsync(memoryStream);
+                memoryStream.Position = 0;
+
+                var fileName = $"voice_{eventData.media.id}.wav";
+                var contentType = eventData.media.mimeType ?? "audio/wav";
+
+                var response = await _chatRepository.SendSpeechToTextAsync(memoryStream, fileName, contentType);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (string.IsNullOrEmpty(responseContent))
+                {
+                    _logger.LogError("Empty response received from STT API");
+                    return null;
+                }
+
+                if (!Services.Utilities.IsValidJson(responseContent))
+                {
+                    _logger.LogError("Invalid JSON response from STT API: {Response}", responseContent);
+                    return null;
+                }
+
+                var stt = JsonSerializer.Deserialize<SpeechToTextResponse>(responseContent, MediaJsonContext.Default.SpeechToTextResponse);
+                if (stt == null)
+                {
+                    _logger.LogError("Failed to deserialize STT response");
+                    return null;
+                }
+
+                _logger.LogInformation("✅ STT success - lang={Lang}, text='{Text}'", stt.language ?? "unknown", stt.text ?? "");
+                return stt;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during STT processing for media ID: {MediaId}", eventData.media.id);
+                return null;
+            }
+        }
+
         // Helper methods for AI optimization
         private AIImageMode DetermineImageMode(string? caption)
         {
