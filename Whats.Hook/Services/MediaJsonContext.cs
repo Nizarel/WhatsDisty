@@ -7,6 +7,7 @@ namespace Whats.Hook.Services
     [JsonSerializable(typeof(BusinessInquiryResponse))]
     [JsonSerializable(typeof(WhatsEventType))]
     [JsonSerializable(typeof(Media))]
+    [JsonSerializable(typeof(OcrResponse))]
     [JsonSourceGenerationOptions(
         PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
         GenerationMode = JsonSourceGenerationMode.Metadata,

@@ -195,16 +195,23 @@ namespace Whats.Hook.Controllers
 
                 _logger.LogInformation("💬 Processing message from PhoneNumber: {PhoneNumber}", eventData.from);
 
-                // Check for media (currently disabled but logged)
+                // Check for media
                 var hasMedia = CheckForMedia(jsonElement, eventData);
-                if (hasMedia)
+                if (hasMedia && eventData.media?.mimeType?.StartsWith("image/") == true)
                 {
-                    _logger.LogWarning("📸 Media message detected but media processing is currently disabled. Processing as text only.");
-                    // In future, re-enable: await ProcessMediaMessage(eventData, conversationId, recipientList);
+                    _logger.LogInformation("📸 Image invoice detected - processing with OCR");
+                    await ProcessInvoiceImage(eventData, eventData.from, recipientList);
                 }
-
-                // Process as text message using new SRM Chat API
-                await ProcessTextMessage(eventData, eventData.from, recipientList);
+                else if (hasMedia)
+                {
+                    _logger.LogWarning("📸 Non-image media detected but not supported yet. Type: {Type}", eventData.media?.mimeType ?? "unknown");
+                    await ProcessTextMessage(eventData, eventData.from, recipientList);
+                }
+                else
+                {
+                    // Process as text message using new SRM Chat API
+                    await ProcessTextMessage(eventData, eventData.from, recipientList);
+                }
 
                 _logger.LogInformation("✅ WhatsApp message processed successfully.");
             }
@@ -218,20 +225,46 @@ namespace Whats.Hook.Controllers
         private bool CheckForMedia(JsonElement jsonElement, WhatsEventType eventData)
         {
             // Check multiple possible media property patterns
-            if (jsonElement.TryGetProperty("mediaUri", out _) && jsonElement.TryGetProperty("mediaContentType", out var mediaContentType))
+            if (jsonElement.TryGetProperty("mediaUri", out var mediaUri) && jsonElement.TryGetProperty("mediaContentType", out var mediaContentType))
             {
-                _logger.LogDebug("📸 Media detected (Pattern 1) - Type: {Type}", mediaContentType.GetString());
-                return true;
+                var mediaId = mediaUri.GetString()?.Split('/').LastOrDefault();
+                if (!string.IsNullOrEmpty(mediaId))
+                {
+                    eventData.media = new Media 
+                    { 
+                        id = mediaId, 
+                        mimeType = mediaContentType.GetString() 
+                    };
+                    _logger.LogDebug("📸 Media detected (Pattern 1) - Type: {Type}, ID: {Id}", mediaContentType.GetString(), mediaId);
+                    return true;
+                }
             }
             if (jsonElement.TryGetProperty("attachments", out var attachments) && attachments.ValueKind == JsonValueKind.Array && attachments.GetArrayLength() > 0)
             {
-                _logger.LogDebug("📎 Attachments detected (Pattern 2)");
-                return true;
+                var firstAttachment = attachments[0];
+                if (firstAttachment.TryGetProperty("id", out var attachId) && firstAttachment.TryGetProperty("contentType", out var contentType))
+                {
+                    eventData.media = new Media 
+                    { 
+                        id = attachId.GetString(), 
+                        mimeType = contentType.GetString() 
+                    };
+                    _logger.LogDebug("📎 Attachments detected (Pattern 2) - ID: {Id}", attachId.GetString());
+                    return true;
+                }
             }
-            if (jsonElement.TryGetProperty("media", out _))
+            if (jsonElement.TryGetProperty("media", out var mediaObj))
             {
-                _logger.LogDebug("📱 Media object detected (Pattern 3)");
-                return true;
+                if (mediaObj.TryGetProperty("id", out var mediaId) && mediaObj.TryGetProperty("mimeType", out var mimeType))
+                {
+                    eventData.media = new Media 
+                    { 
+                        id = mediaId.GetString(), 
+                        mimeType = mimeType.GetString() 
+                    };
+                    _logger.LogDebug("📱 Media object detected (Pattern 3) - ID: {Id}", mediaId.GetString());
+                    return true;
+                }
             }
             return false;
         }
@@ -263,6 +296,91 @@ namespace Whats.Hook.Controllers
             
             // Add + prefix for international format
             return $"+{digitsOnly}";
+        }
+
+        private async Task ProcessInvoiceImage(WhatsEventType eventData, string phoneNumber, List<string> recipientList)
+        {
+            _logger.LogInformation("📄 Processing invoice image for phone: {Phone}", phoneNumber);
+
+            // Extract contracts using OCR
+            var ocrResult = await _mediaService.ProcessInvoiceOcrAsync(eventData, _logger);
+            
+            if (ocrResult == null || ocrResult.status != "success")
+            {
+                _logger.LogError("❌ OCR processing failed or returned unsuccessful status");
+                
+                // Send error message in Arabic (most common language)
+                var errorMessage = "عذراً، لم أتمكن من قراءة الفاتورة. يرجى التأكد من وضوح الصورة وإرسالها مرة أخرى.";
+                await _notificationService.SendTextNotification(errorMessage, recipientList, _logger);
+                return;
+            }
+
+            // Check if any contracts were found
+            var hasWater = !string.IsNullOrEmpty(ocrResult.water_contract);
+            var hasElectricity = !string.IsNullOrEmpty(ocrResult.electricity_contract);
+
+            if (!hasWater && !hasElectricity)
+            {
+                _logger.LogWarning("⚠️ No contracts found in invoice image");
+                
+                var noContractMessage = "لم يتم العثور على أي رقم عقد في الفاتورة. يرجى التأكد من إرسال صورة فاتورة الماء أو الكهرباء.";
+                await _notificationService.SendTextNotification(noContractMessage, recipientList, _logger);
+                return;
+            }
+
+            // Get existing conversation_id for this phone number
+            string? conversationId = null;
+            lock (_phoneConversationMap)
+            {
+                _phoneConversationMap.TryGetValue(phoneNumber, out conversationId);
+            }
+
+            // Process water contract if found
+            if (hasWater)
+            {
+                _logger.LogInformation("💧 Water contract found: {Contract}", ocrResult.water_contract);
+                
+                var waterMessage = $"رقم عقد الماء المستخرج من الفاتورة: {ocrResult.water_contract}";
+                var (waterResponse, waterConvId) = await _sessionService.ProcessChatAsync(conversationId, waterMessage, _logger, "ar");
+                
+                if (!string.IsNullOrEmpty(waterConvId))
+                {
+                    lock (_phoneConversationMap)
+                    {
+                        _phoneConversationMap[phoneNumber] = waterConvId;
+                    }
+                    conversationId = waterConvId;
+                }
+                
+                if (!string.IsNullOrEmpty(waterResponse))
+                {
+                    await _notificationService.SendTextNotification(waterResponse, recipientList, _logger);
+                }
+            }
+
+            // Process electricity contract if found
+            if (hasElectricity)
+            {
+                _logger.LogInformation("⚡ Electricity contract found: {Contract}", ocrResult.electricity_contract);
+                
+                var electricityMessage = $"رقم عقد الكهرباء المستخرج من الفاتورة: {ocrResult.electricity_contract}";
+                var (electricityResponse, electricityConvId) = await _sessionService.ProcessChatAsync(conversationId, electricityMessage, _logger, "ar");
+                
+                if (!string.IsNullOrEmpty(electricityConvId))
+                {
+                    lock (_phoneConversationMap)
+                    {
+                        _phoneConversationMap[phoneNumber] = electricityConvId;
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(electricityResponse))
+                {
+                    await _notificationService.SendTextNotification(electricityResponse, recipientList, _logger);
+                }
+            }
+
+            _logger.LogInformation("✅ Invoice processing completed for phone: {Phone}", phoneNumber);
         }
 
         private async Task ProcessTextMessage(WhatsEventType eventData, string phoneNumber, List<string> recipientList)

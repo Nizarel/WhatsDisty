@@ -151,6 +151,81 @@ namespace Whats.Hook.Services
             }
         }
 
+        /// <summary>
+        /// Process invoice image to extract water and electricity contract numbers using OCR.
+        /// </summary>
+        public async Task<OcrResponse?> ProcessInvoiceOcrAsync(WhatsEventType eventData, ILogger log)
+        {
+            var stopwatch = Stopwatch.StartNew();
+
+            if (eventData.media == null || string.IsNullOrEmpty(eventData.media.id))
+            {
+                _logger.LogError("Media information is missing for OCR processing");
+                return null;
+            }
+
+            _logger.LogInformation("📄 Processing invoice OCR with media ID: {MediaId}", eventData.media.id);
+
+            try
+            {
+                // Download media from WhatsApp
+                var mediaContentResponse = await _notificationMessagesClient.DownloadMediaAsync(eventData.media.id);
+                await using var mediaContentStream = mediaContentResponse.Value;
+                
+                if (mediaContentStream.Length == 0)
+                {
+                    _logger.LogWarning("Downloaded media stream is empty for media ID: {MediaId}", eventData.media.id);
+                    return null;
+                }
+                
+                _logger.LogInformation("📥 Downloaded invoice image: {Length} bytes", mediaContentStream.Length);
+
+                // Determine file name and content type
+                var fileName = $"invoice_{eventData.media.id}.jpg";
+                var contentType = eventData.media.mimeType ?? "image/jpeg";
+
+                // Call OCR API
+                var response = await _chatRepository.SendOcrExtractContractAsync(mediaContentStream, fileName, contentType);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (string.IsNullOrEmpty(responseContent))
+                {
+                    _logger.LogError("Empty response received from OCR API");
+                    return null;
+                }
+
+                if (!Services.Utilities.IsValidJson(responseContent))
+                {
+                    _logger.LogError("Invalid JSON response from OCR API: {Response}", responseContent);
+                    return null;
+                }
+
+                // Parse OCR response
+                var ocrResponse = JsonSerializer.Deserialize<OcrResponse>(responseContent, MediaJsonContext.Default.OcrResponse);
+                
+                if (ocrResponse == null)
+                {
+                    _logger.LogError("Failed to deserialize OCR response");
+                    return null;
+                }
+
+                stopwatch.Stop();
+                _logger.LogInformation("✅ OCR processing completed in {ElapsedMs}ms - Water: {Water}, Electricity: {Electricity}", 
+                    stopwatch.ElapsedMilliseconds, 
+                    ocrResponse.water_contract ?? "none", 
+                    ocrResponse.electricity_contract ?? "none");
+
+                return ocrResponse;
+            }
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+                _logger.LogError(ex, "❌ Error during OCR processing for media ID: {MediaId} after {ElapsedMs}ms", 
+                    eventData.media.id, stopwatch.ElapsedMilliseconds);
+                return null;
+            }
+        }
+
         // Helper methods for AI optimization
         private AIImageMode DetermineImageMode(string? caption)
         {

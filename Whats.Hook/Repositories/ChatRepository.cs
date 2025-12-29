@@ -41,6 +41,20 @@ namespace Whats.Hook.Repositories
         }
 
         /// <summary>
+        /// Extract water and electricity contract numbers from invoice image.
+        /// POST /api/ocr/extract-contract with multipart/form-data file upload.
+        /// </summary>
+        public async Task<HttpResponseMessage> SendOcrExtractContractAsync(Stream imageStream, string fileName, string contentType)
+        {
+            using var content = new MultipartFormDataContent();
+            var streamContent = new StreamContent(imageStream);
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+            content.Add(streamContent, "file", fileName);
+
+            return await _httpClient.PostAsync($"{_srmApiUrl}/api/ocr/extract-contract", content);
+        }
+
+        /// <summary>
         /// Convenience overload to send a chat message with explicit parameters.
         /// conversation_id can be null for new conversations - API will create and return one.
         /// </summary>
